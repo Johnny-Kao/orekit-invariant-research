@@ -24,13 +24,25 @@ jobs:
           ref: 90d9b4bdda78891e451d881afa3c11ac9645ac42
           path: upstream
           persist-credentials: false
+      - name: Checkout pinned Hipparchus development dependency
+        uses: actions/checkout@v4
+        with:
+          repository: Hipparchus-Math/hipparchus
+          ref: a32301f096e97f098dedbdb3fab41d8343128595
+          path: hipparchus
+          persist-credentials: false
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-          cache-dependency-path: upstream/pom.xml
+          cache-dependency-path: |
+            upstream/pom.xml
+            hipparchus/pom.xml
+      - name: Install pinned Hipparchus 4.1-SNAPSHOT
+        working-directory: hipparchus
+        run: mvn -B -ntp -DskipTests -Dgpg.skip=true install
       - name: Record tested commit
         run: |
           git -C upstream rev-parse HEAD
