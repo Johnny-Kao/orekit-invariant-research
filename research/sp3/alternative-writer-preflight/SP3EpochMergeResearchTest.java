@@ -80,6 +80,31 @@ class SP3EpochMergeResearchTest {
     }
 
     @Test
+    void sameSatelliteEpochsBelowPrintedPrecisionAreRejected() throws Exception {
+        final SP3 input = create(0.0);
+        input.getSatellites().get("G01").addCoordinate(
+            coordinate(AbsoluteDate.J2000_EPOCH.shiftedBy(1.0e-9), 2.2e7), 900);
+        input.validate(false, "same-satellite-subprecision");
+        final StringWriter out = new StringWriter();
+        Assertions.assertThrows(OrekitException.class,
+            () -> new SP3Writer(out, "same-satellite-subprecision",
+                                TimeScalesFactory.getTimeScales()).write(input));
+        Assertions.assertEquals("", out.toString());
+    }
+
+    @Test
+    void duplicateSameSatelliteEpochCannotMaskCrossSatelliteCollision() throws Exception {
+        final SP3 input = create(0.5);
+        input.getSatellites().get("G01").addCoordinate(
+            coordinate(AbsoluteDate.J2000_EPOCH, 2.2e7), 900);
+        input.validate(false, "duplicate-masking");
+        final StringWriter out = new StringWriter();
+        Assertions.assertThrows(OrekitException.class,
+            () -> new SP3Writer(out, "duplicate-masking", TimeScalesFactory.getTimeScales()).write(input));
+        Assertions.assertEquals("", out.toString());
+    }
+
+    @Test
     void distinctEpochsWithinToleranceFailBeforeOutput() throws Exception {
         final SP3 input = create(0.5);
         input.validate(true, "research");

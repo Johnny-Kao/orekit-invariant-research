@@ -1,55 +1,64 @@
-# Alternative B — SP3Writer-only preflight (research)
+# SP3Writer-only preflight — Research A/B comparison
 
-## Status
+## Scope
 
-Independent A/B variant. The current GitLab personal fork Staging branch is **not changed**. This research-only branch patch targets pinned Orekit commit `90d9b4bdda78891e451d881afa3c11ac9645ac42`.
+This is an independent alternative to the existing `SP3.validate(false)` guard, based on Orekit `90d9b4bdda78891e451d881afa3c11ac9645ac42`. GitLab personal Fork Staging `research/sp3-epoch-collision-staging` and the official upstream are **untouched**.
 
-## What changes
+## A vs B
 
-After the pre-existing `sp3.validate(false, outputName)` check but **before** the writer emits its header, simulate the existing Writer epoch-consumption loop using new `CoordinatesIterator` objects. If the number of output epochs differs from the header, throw the already existing `SP3_NUMBER_OF_EPOCH_MISMATCH` exception. Normal writing uses its original iterators and is unmodified.
-
-This is an exact check of the count that Writer's current grouping logic would output, not a new rule deciding which epochs *ought* to match. Input `SP3.validate(false)` retains its old behavior. No new `OrekitMessages` key, localization file, or public API change is required.
-
-Files touched in the production patch: `SP3Writer.java` only; **+24 lines, 0 removed**. Research regression test is separate.
-
-## Confirmed tests (macOS, Java 21)
-
-`mvn -B -ntp '-Dtest=SP3*Test,OrekitMessagesTest' -DfailIfNoTests=true test` returned **105/105 PASS**. `mvn -B -ntp -DskipTests checkstyle:check` returned **0 violations**.
-
-Test cases:
-- 0.5 s offset across two satellites: Writer rejects before writing any output, while `SP3.validate(false)` continues accepting the input.
-- 1 ns offset across two satellites: similarly rejected.
-- Same satellite has consecutive 0.5 s epochs: Writer accepts and round-trips.
-- Same exact epoch across satellites: accepted.
-- Ordinary 900 s gap, and 900.5 s shifted epoch: accepted and round-trip.
-- Existing SP3Writer, SP3Parser, and localized-message tests pass.
-
-## A/B assessment
-
-| Dimension | A: stricter public validate | B: Writer-only preflight |
+| Topic | A: public validate guard (current GitLab staging) | B: Writer-only preflight (this research) |
 |---|---|---|
-| Changed production code | `SP3.java`, `OrekitMessages.java`, 11 localization files | `SP3Writer.java` only |
-| Source insertion | +72/-1 plus count test and 154-line new regression test | +24/-0 plus 154-line research regression test |
-| Existing public validate(false) behavior | Restricts inputs | Preserved |
-| Failure before output | Yes | Yes |
-| Existing writer epoch-selection semantics | Preserved | Preserved |
-| Error string | New specific `SP3_EPOCHS_TOO_CLOSE` | Existing `SP3_NUMBER_OF_EPOCH_MISMATCH` |
-| Incremental work on ordinary data | O(E) extra scan | One complete scheduling/iterator pass, roughly O(E*S + C) |
-| Additional memory | O(1) extra | O(S) extra iterators |
-| Tests | 105 pass on relevant suites (incl. benchmark) | 105 pass on relevant suites (incl. benchmark) |
-| Maintenance | More new logic, translation overhead | Shorter and Writer-local; duplicated epoch grouping expression |
+| Production files | SP3.java, OrekitMessages.java, 11 localization resources | SP3Writer.java only |
+| Production diff | +72/−1 (13 files) | +51/−9 (1 file; 9 lines moved to shared formatter) |
+| Public `SP3.validate(false)` | Narrowed acceptance of some formerly valid objects | Unchanged |
+| Output epoch count mismatch | Rejects collisions before output | Simulates actual Writer schedule and rejects before output |
+| Same-satellite legitimate 0.5 s epochs | Accepted | Accepted |
+| Repeated epoch / collision cancellation | A cross-satellite guard rejects the tested combination | Count-only B initially missed it; **fixed by ordered epoch verification** |
+| Distinct timestamps with identical 8-digit printed representation | A initially missed this edge | **Fixed by comparing exact formatted output epochs** |
+| Error messages / localization | New `SP3_EPOCHS_TOO_CLOSE` and 11 resources | Reuses `SP3_NUMBER_OF_EPOCH_MISMATCH` and `INCONSISTENT_SAMPLING_DATE` |
+| Extra time in normal path | `O(E)` on existing sorted set | One additional `O(E×S + C)` epoch scheduling pass, including epoch formatting |
+| Extra memory | `O(1)` | `O(S)` iterator objects |
+| Maintenance | More state, wider API effect | One-file change; scheduling predicate remains duplicated with actual Writer |
 
-Here E is emitted epoch count, S number of satellites, C number of coordinates. The Writer itself already scans iterators for each epoch. Therefore B doubles **scheduling**, not the whole output formatting cost. A can be faster on large normal inputs; B is simpler and preserves the public validation contract. A's near-collision path can also incur `O(C log E)` checks.
+E = number of epochs; S = satellites; C = coordinates. B simulates the exact existing iterator-consumption schedule *before writing the header*. It also verifies output times are strictly increasing and distinct after formatting to the SP3 8-decimal precision. The same `formatEpoch` helper is used by both preview and real output to avoid formatting drift.
 
-## Why this escaped existing tests (hypothesis, not historical proof)
+B preserves `SP3.validate(false)` semantics and does not modify Writer's existing selection of coordinates. It is **not performance-neutral**: it deliberately computes the schedule twice.
 
-SP3Writer's grouping tolerance is a legitimate response to small satellite timestamp discrepancies, while `SP3.validate` checks the count of **exactly distinct** epoch dates. These independently reasonable conventions become inconsistent only if different satellites supply near-but-not-equal timestamps. The existing SP3Writer test cases focus heavily on standard compliant files and round-trips; they do not establish coverage of this specific near-collision cross-satellite arrangement.
+## Functional verification
 
-Searches of Orekit GitLab SP3 issues/MRs found many other SP3 parser/writer reports, but no exact duplicate for this cross-satellite epoch-count collapse among the results inspected. This is not proof that no one ever noticed or that production users encounter it often.
+macOS Java 21, pinned Orekit 14.0-SNAPSHOT and Hipparchus 4.1-SNAPSHOT:
 
-## Remaining engineering work before a maintainer proposal
+- Command: `mvn -B -ntp '-Dtest=SP3*Test,OrekitMessagesTest' -DfailIfNoTests=true test`
+- Result: **108 tests passed; 0 failures/errors** (including one research Writer benchmark test and one validation benchmark test)
+- `mvn -B -ntp -DskipTests checkstyle:check`: **0 violations**
+- Cross-satellite 0.5 s and 1 ns offset: rejection before any output
+- Same-satellite consecutive 0.5 s: two valid output epochs / Parser round-trip
+- Duplicate same-satellite time masking a cross-satellite collapse: rejected (test was RED with count-only B)
+- Same-satellite 1 ns distinct dates that print identically: rejected (test was RED before formatting check)
+- Identical times across satellites: one valid epoch
+- 900 s standard and 900.5 s allowed offset: round-trip
 
-- Compare the runtime cost of B's extra schedule scan against A in a large multi-satellite *realistic writer workload*, not merely the existing `SP3.validate` benchmark.
-- Replace research-only test class/header/prints with idiomatic tests in `SP3WriterTest`.
-- Consider extracting the shared match predicate so the preflight and actual writer cannot drift if grouping semantics evolve.
-- Check target branch: Orekit contributing guide prefers the latest release branch for bug fixes without API changes; current GitLab staging is on `develop`. Do not rebase or push without further approval.
+Only a localized Research copy was modified; Staging was not updated.
+
+## Approximate Writer benchmark
+
+Synthetic `SP3` with regular epochs, positions only, same data for all satellites, and a no-op `Appendable` sink to exclude retention of the generated text. Three warmup runs and seven timed runs; median shown. Comparisons were executed in **separate JVM runs** and are noisy, not an established regression threshold.
+
+| Case | Unmodified Writer | Initial B (count only) | Refined B (count + formatted-time check) |
+|---|---:|---:|---:|
+| 1,000 epochs / 2 satellites / 2,000 coordinates | 16.555 ms | 20.939 ms | 20.530 ms |
+| 2,000 epochs / 20 satellites / 40,000 coordinates | 70.102 ms | 62.224 ms | 80.131 ms |
+
+The 20-satellite numbers show measurement noise; B adds scheduling work by construction. Do not infer a stable overhead percentage from these independent runs. The benchmark program is `SP3WriterPerformanceResearchTest.java`. The synthetic sink discards content but real Writer formatting still executes.
+
+## Why this was not previously noticed — evidence and limits
+
+`SP3.validate` counts distinct exact timestamps, while `SP3Writer` uses a grouping tolerance of 0.1% of nominal epoch interval; each convention individually looks reasonable. The inconsistency requires at least two different satellite date streams close enough to collapse. Existing writer regression tests primarily exercise standard SP3 files and ordinary round-trips. Searches of the Orekit GitLab SP3-related issues and MRs found other parser/writer problems but **no exact duplicate in the inspected results**. This supports a missing edge-case regression test, not a claim about how often production systems experience it or when any maintainer first became aware.
+
+## Before any upstream MR
+
+- Decide whether B's extra Writer scheduling overhead is acceptable; assess with realistic high-volume SP3 exports if necessary.
+- Move the concise regression tests into existing `SP3WriterTest` and supply the project-standard license header. Keep research-only diagnostics outside the upstream patch.
+- Recheck that output formatting extraction preserves golden files; 108 tests already passed.
+- Orekit contributing instructions recommend the latest release branch for no-API-change fixes. GitLab personal Fork staging currently uses `develop`, and remains untouched.
+- No upstream issue, MR, comment, or push without explicit approval.

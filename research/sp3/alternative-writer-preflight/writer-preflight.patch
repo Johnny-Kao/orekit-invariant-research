@@ -9,12 +9,15 @@
  import org.orekit.gnss.PredefinedTimeSystem;
  import org.orekit.gnss.TimeSystem;
  import org.orekit.time.AbsoluteDate;
-@@ -97,6 +99,28 @@
+@@ -97,6 +99,38 @@
      public void write(final SP3 sp3)
          throws IOException {
          sp3.validate(false, outputName);
 +
 +        // Check how many epochs the writer will actually emit before writing the header.
++        final TimeScale timeScale = sp3.getHeader().getTimeSystem().getTimeScale(timeScales);
++        String previousEpoch = null;
++        AbsoluteDate previousDate = null;
 +        final CoordinatesIterator[] check = new CoordinatesIterator[sp3.getSatelliteCount()];
 +        int index = 0;
 +        for (final SP3Ephemeris ephemeris : sp3.getSatellites().values()) {
@@ -22,6 +25,13 @@
 +        }
 +        int count = 0;
 +        for (AbsoluteDate date = earliest(check); !date.equals(AbsoluteDate.FUTURE_INFINITY); date = earliest(check)) {
++            final String epoch = formatEpoch(date, timeScale);
++            if (previousDate != null && (!date.isAfter(previousDate) || epoch.equals(previousEpoch))) {
++                throw new OrekitException(OrekitMessages.INCONSISTENT_SAMPLING_DATE,
++                                          previousDate.shiftedBy(sp3.getHeader().getEpochInterval()), date);
++            }
++            previousDate = date;
++            previousEpoch = epoch;
 +            ++count;
 +            for (final CoordinatesIterator iter : check) {
 +                if (iter.pending != null &&
@@ -38,3 +48,46 @@
          writeHeader(sp3.getHeader());
  
          // set up iterators for all satellites
+@@ -106,18 +140,10 @@
+             iterators[k++] = new CoordinatesIterator(entry.getValue());
+         }
+ 
+-        final TimeScale timeScale  = sp3.getHeader().getTimeSystem().getTimeScale(timeScales);
+         for (AbsoluteDate date = earliest(iterators); !date.equals(AbsoluteDate.FUTURE_INFINITY); date = earliest(iterators)) {
+ 
+             // epoch
+-            final DateTimeComponents dtc = date.getComponents(timeScale).roundIfNeeded(60, 8);
+-            output.append(String.format(Locale.US, "*  %4d %2d %2d %2d %2d %11.8f%n",
+-                                        dtc.getDate().getYear(),
+-                                        dtc.getDate().getMonth(),
+-                                        dtc.getDate().getDay(),
+-                                        dtc.getTime().getHour(),
+-                                        dtc.getTime().getMinute(),
+-                                        dtc.getTime().getSecond()));
++            output.append(formatEpoch(date, timeScale));
+ 
+             for (final CoordinatesIterator iter : iterators) {
+ 
+@@ -147,6 +173,22 @@
+         output.append("EOF").
+                append(EOL);
+ 
++    }
++
++    /** Format an epoch using the exact representation written to SP3 files.
++     * @param date epoch date
++     * @param timeScale time scale
++     * @return formatted epoch line
++     */
++    private String formatEpoch(final AbsoluteDate date, final TimeScale timeScale) {
++        final DateTimeComponents dtc = date.getComponents(timeScale).roundIfNeeded(60, 8);
++        return String.format(Locale.US, "*  %4d %2d %2d %2d %2d %11.8f%n",
++                             dtc.getDate().getYear(),
++                             dtc.getDate().getMonth(),
++                             dtc.getDate().getDay(),
++                             dtc.getTime().getHour(),
++                             dtc.getTime().getMinute(),
++                             dtc.getTime().getSecond());
+     }
+ 
+     /** Find earliest date in ephemerides.
