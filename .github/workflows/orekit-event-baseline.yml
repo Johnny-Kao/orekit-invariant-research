@@ -1,0 +1,51 @@
+name: Orekit event baseline (pinned upstream)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/orekit-event-baseline.yml"
+      - "README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  event-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout research metadata
+        uses: actions/checkout@v4
+      - name: Checkout pinned Orekit mirror
+        uses: actions/checkout@v4
+        with:
+          repository: CS-SI/Orekit
+          ref: 90d9b4bdda78891e451d881afa3c11ac9645ac42
+          path: upstream
+          persist-credentials: false
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: upstream/pom.xml
+      - name: Record tested commit
+        run: |
+          git -C upstream rev-parse HEAD
+          git -C upstream rev-parse HEAD | grep -Fx '90d9b4bdda78891e451d881afa3c11ac9645ac42'
+      - name: Focused upstream event regression baseline
+        working-directory: upstream
+        run: >-
+          mvn -B -ntp
+          -Dtest=DateDetectorTest,BackAndForthDetectorTest,EventEnablingPredicateFilterTest,EventSlopeFilterTest,CloseEventsNumericalDP853Test
+          -DfailIfNoTests=true
+          test
+      - name: Archive Surefire test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orekit-event-baseline-surefire
+          path: upstream/target/surefire-reports/
+          if-no-files-found: warn
