@@ -1,22 +1,59 @@
 --- a/src/main/java/org/orekit/files/sp3/SP3.java
 +++ b/src/main/java/org/orekit/files/sp3/SP3.java
-@@ -139,6 +139,20 @@
+@@ -23,6 +23,7 @@
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.util.NavigableSet;
+ import java.util.SortedSet;
+ import java.util.TreeSet;
+ 
+@@ -102,7 +103,7 @@
+     public void validate(final boolean parsing, final String fileName) throws OrekitException {
+ 
+         // check available data
+-        final SortedSet<AbsoluteDate> epochs = new TreeSet<>(new ChronologicalComparator());
++        final NavigableSet<AbsoluteDate> epochs = new TreeSet<>(new ChronologicalComparator());
+         boolean hasAccuracy = false;
+         for (final Map.Entry<String, SP3Ephemeris> entry : satellites.entrySet()) {
+             SP3Coordinate previous = null;
+@@ -139,6 +140,40 @@
          if (epochs.size() != header.getNumberOfEpochs()) {
              throw new OrekitException(OrekitMessages.SP3_NUMBER_OF_EPOCH_MISMATCH,
                                        epochs.size(), fileName, header.getNumberOfEpochs());
 +        }
 +
-+        // When preparing a file for output, reject distinct epochs that the writer
-+        // would collapse into one record. Reuse the sorted set already built above.
++        // A close timestamp is only problematic if a satellite's next coordinate
++        // is assigned to an earlier epoch by the SP3 writer. Consecutive nearby
++        // timestamps on the same satellite are not combined by the writer.
 +        if (!parsing) {
-+            AbsoluteDate previousEpoch = null;
 +            final double tolerance = 0.001 * header.getEpochInterval();
++            AbsoluteDate previousEpoch = null;
++            boolean hasCloseEpochs = false;
 +            for (final AbsoluteDate epoch : epochs) {
 +                if (previousEpoch != null && epoch.durationFrom(previousEpoch) <= tolerance) {
-+                    throw new OrekitException(OrekitMessages.SP3_EPOCHS_TOO_CLOSE,
-+                                              previousEpoch, epoch, fileName, tolerance);
++                    hasCloseEpochs = true;
++                    break;
 +                }
 +                previousEpoch = epoch;
++            }
++            if (hasCloseEpochs) {
++                for (final SP3Ephemeris ephemeris : satellites.values()) {
++                    AbsoluteDate previousCoordinate = null;
++                    for (final SP3Segment segment : ephemeris.getSegments()) {
++                        for (final SP3Coordinate coordinate : segment.getCoordinates()) {
++                            final AbsoluteDate date = coordinate.getDate();
++                            final AbsoluteDate earlierEpoch = epochs.lower(date);
++                            if (earlierEpoch != null &&
++                                date.durationFrom(earlierEpoch) <= tolerance &&
++                                !earlierEpoch.equals(previousCoordinate)) {
++                                throw new OrekitException(OrekitMessages.SP3_EPOCHS_TOO_CLOSE,
++                                                          earlierEpoch, date, fileName, tolerance);
++                            }
++                            previousCoordinate = date;
++                        }
++                    }
++                }
 +            }
          }
  
@@ -33,3 +70,146 @@
      /** SP3_INCOMPATIBLE_FILE_METADATA. */
      SP3_INCOMPATIBLE_FILE_METADATA("cannot splice sp3 files with incompatible metadata"),
  
+--- a/src/test/java/org/orekit/errors/OrekitMessagesTest.java
++++ b/src/test/java/org/orekit/errors/OrekitMessagesTest.java
+@@ -32,7 +32,7 @@
+ 
+     @Test
+     public void testMessageNumber() {
+-        Assertions.assertEquals(375, OrekitMessages.values().length);
++        Assertions.assertEquals(376, OrekitMessages.values().length);
+     }
+ 
+     @Test
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_ca.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_ca.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=s''han trobat {0} èpoques en el fitxer {1} en comptes de {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=impossible d''adjuntar els fitxers sp3 tenint metadata diferent
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_da.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_da.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=fandt {0} epoker i filen {1}, forventede {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_de.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_de.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=Es wurden {0} von {2} erwarteten Epochen in der Datei {1} gefunden
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_el.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_el.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_en.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_en.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=found {0} epochs in file {1}, expected {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=cannot splice sp3 files with incompatible metadata
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_es.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_es.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=se han encontrado {0} épocas en el fichero {1} en vez de {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=imposible de adjuntar los ficheros sp3 teniendo metadata diferente
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_fr.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_fr.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH={0} époques trouvées dans le fichier {1} au lieu de {2} attendues
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=les époques SP3 distinctes {0} et {1} du fichier {2} sont séparées de moins de {3} s (tolérance de regroupement à l''écriture)
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=impossible de joindre des fichiers sp3 ayant des métadonnées différentes
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_gl.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_gl.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_it.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_it.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH={0} epoche trovate nel file {1} invece di {2} attese
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_no.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_no.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=fant {0} epoker i filen {1}, ventet {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=
+--- a/src/main/resources/assets/org/orekit/localization/OrekitMessages_ro.utf8
++++ b/src/main/resources/assets/org/orekit/localization/OrekitMessages_ro.utf8
+@@ -432,6 +432,9 @@
+ 
+ # found {0} epochs in file {1}, expected {2}
+ SP3_NUMBER_OF_EPOCH_MISMATCH=au fost găsite {0} date de referință în fișierul {1}, așteptate {2}
++
++# distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s
++SP3_EPOCHS_TOO_CLOSE=
+ 
+ # cannot splice sp3 files with incompatible metadata
+ SP3_INCOMPATIBLE_FILE_METADATA=imposibil de concatenat fișiere sp3 cu metadate incompatibile

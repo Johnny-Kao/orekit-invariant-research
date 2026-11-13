@@ -64,6 +64,22 @@ class SP3EpochMergeResearchTest {
     }
 
     @Test
+    void sameSatelliteConsecutiveCloseEpochsRemainSerializable() throws Exception {
+        final SP3 input = create(0);
+        final AbsoluteDate secondDate = AbsoluteDate.J2000_EPOCH.shiftedBy(0.5);
+        input.getSatellites().get("G01").addCoordinate(coordinate(secondDate, 2.2e7), 900);
+        input.validate(true, "same-satellite");
+        final StringWriter out = new StringWriter();
+        new SP3Writer(out, "same-satellite", TimeScalesFactory.getTimeScales()).write(input);
+        final long emitted = out.toString().lines().filter(line -> line.startsWith("*  ")).count();
+        Assertions.assertEquals(2L, emitted);
+        final byte[] bytes = out.toString().getBytes(StandardCharsets.UTF_8);
+        final SP3 reparsed = new SP3Parser().parse(
+            new DataSource("same-satellite", () -> new ByteArrayInputStream(bytes)));
+        Assertions.assertEquals(2, reparsed.getHeader().getNumberOfEpochs());
+    }
+
+    @Test
     void distinctEpochsWithinToleranceFailBeforeOutput() throws Exception {
         final SP3 input = create(0.5);
         input.validate(true, "research");
