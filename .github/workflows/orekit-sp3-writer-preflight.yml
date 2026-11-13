@@ -1,0 +1,62 @@
+name: Orekit SP3 Writer preflight alternative (research)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/orekit-sp3-writer-preflight.yml"
+      - "research/sp3/alternative-writer-preflight/**"
+
+permissions:
+  contents: read
+
+jobs:
+  writer-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout research repository
+        uses: actions/checkout@v4
+      - name: Checkout fixed Orekit snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: CS-SI/Orekit
+          ref: 90d9b4bdda78891e451d881afa3c11ac9645ac42
+          path: upstream
+          persist-credentials: false
+      - name: Checkout fixed Hipparchus snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: Hipparchus-Math/hipparchus
+          ref: a32301f096e97f098dedbdb3fab41d8343128595
+          path: hipparchus
+          persist-credentials: false
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: |
+            upstream/pom.xml
+            hipparchus/pom.xml
+      - name: Install Hipparchus snapshot
+        working-directory: hipparchus
+        run: mvn -B -ntp -DskipTests -Dgpg.skip=true install
+      - name: Apply writer-only alternative
+        run: |
+          git -C upstream apply --check "$GITHUB_WORKSPACE/research/sp3/alternative-writer-preflight/writer-preflight.patch"
+          git -C upstream apply "$GITHUB_WORKSPACE/research/sp3/alternative-writer-preflight/writer-preflight.patch"
+          cp research/sp3/alternative-writer-preflight/SP3EpochMergeResearchTest.java upstream/src/test/java/org/orekit/files/sp3/
+      - name: Run SP3 tests and Checkstyle
+        working-directory: upstream
+        run: |
+          mvn -B -ntp '-Dtest=SP3*Test,OrekitMessagesTest' -DfailIfNoTests=true test
+          mvn -B -ntp -DskipTests checkstyle:check
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp3-writer-preflight-surefire
+          path: upstream/target/surefire-reports/
+          if-no-files-found: warn

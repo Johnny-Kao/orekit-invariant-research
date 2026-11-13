@@ -1,0 +1,40 @@
+--- a/src/main/java/org/orekit/files/sp3/SP3Writer.java
++++ b/src/main/java/org/orekit/files/sp3/SP3Writer.java
+@@ -23,6 +23,8 @@
+ import java.util.Map;
+ 
+ import org.hipparchus.util.FastMath;
++import org.orekit.errors.OrekitException;
++import org.orekit.errors.OrekitMessages;
+ import org.orekit.gnss.PredefinedTimeSystem;
+ import org.orekit.gnss.TimeSystem;
+ import org.orekit.time.AbsoluteDate;
+@@ -97,6 +99,28 @@
+     public void write(final SP3 sp3)
+         throws IOException {
+         sp3.validate(false, outputName);
++
++        // Check how many epochs the writer will actually emit before writing the header.
++        final CoordinatesIterator[] check = new CoordinatesIterator[sp3.getSatelliteCount()];
++        int index = 0;
++        for (final SP3Ephemeris ephemeris : sp3.getSatellites().values()) {
++            check[index++] = new CoordinatesIterator(ephemeris);
++        }
++        int count = 0;
++        for (AbsoluteDate date = earliest(check); !date.equals(AbsoluteDate.FUTURE_INFINITY); date = earliest(check)) {
++            ++count;
++            for (final CoordinatesIterator iter : check) {
++                if (iter.pending != null &&
++                    FastMath.abs(iter.pending.getDate().durationFrom(date)) <= 0.001 * sp3.getHeader().getEpochInterval()) {
++                    iter.advance();
++                }
++            }
++        }
++        if (count != sp3.getHeader().getNumberOfEpochs()) {
++            throw new OrekitException(OrekitMessages.SP3_NUMBER_OF_EPOCH_MISMATCH,
++                                      count, outputName, sp3.getHeader().getNumberOfEpochs());
++        }
++
+         writeHeader(sp3.getHeader());
+ 
+         // set up iterators for all satellites
