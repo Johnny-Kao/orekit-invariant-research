@@ -1,0 +1,35 @@
+--- a/src/main/java/org/orekit/files/sp3/SP3.java
++++ b/src/main/java/org/orekit/files/sp3/SP3.java
+@@ -139,6 +139,20 @@
+         if (epochs.size() != header.getNumberOfEpochs()) {
+             throw new OrekitException(OrekitMessages.SP3_NUMBER_OF_EPOCH_MISMATCH,
+                                       epochs.size(), fileName, header.getNumberOfEpochs());
++        }
++
++        // When preparing a file for output, reject distinct epochs that the writer
++        // would collapse into one record. Reuse the sorted set already built above.
++        if (!parsing) {
++            AbsoluteDate previousEpoch = null;
++            final double tolerance = 0.001 * header.getEpochInterval();
++            for (final AbsoluteDate epoch : epochs) {
++                if (previousEpoch != null && epoch.durationFrom(previousEpoch) <= tolerance) {
++                    throw new OrekitException(OrekitMessages.SP3_EPOCHS_TOO_CLOSE,
++                                              previousEpoch, epoch, fileName, tolerance);
++                }
++                previousEpoch = epoch;
++            }
+         }
+ 
+     }
+--- a/src/main/java/org/orekit/errors/OrekitMessages.java
++++ b/src/main/java/org/orekit/errors/OrekitMessages.java
+@@ -506,6 +506,9 @@
+     /** SP3_NUMBER_OF_EPOCH_MISMATCH. */
+     SP3_NUMBER_OF_EPOCH_MISMATCH("found {0} epochs in file {1}, expected {2}"),
+ 
++    /** SP3_EPOCHS_TOO_CLOSE. */
++    SP3_EPOCHS_TOO_CLOSE("distinct SP3 epochs {0} and {1} in file {2} are within the writer grouping tolerance of {3} s"),
++
+     /** SP3_INCOMPATIBLE_FILE_METADATA. */
+     SP3_INCOMPATIBLE_FILE_METADATA("cannot splice sp3 files with incompatible metadata"),
+ 
